@@ -265,24 +265,38 @@ class BoothStatisticsService:
             )
         ]
 
-        # 시간별 매출 (17~23시)
+        # 날짜별 시간별 매출 (17~23시) — 운영 날짜마다 개별 생성
         HOURS = list(range(17, 24))
-        hourly_map = {h: 0 for h in HOURS}
+        hourly_by_date = {}
         for row in (
             Order.objects
             .filter(id__in=order_ids)
-            .annotate(hour=ExtractHour('created_at', tzinfo=tz))
+            .annotate(
+                order_date=TruncDate('created_at', tzinfo=tz),
+                hour=ExtractHour('created_at', tzinfo=tz),
+            )
             .filter(hour__in=HOURS)
-            .values('hour')
+            .values('order_date', 'hour')
             .annotate(revenue=Sum('order_price'))
+            .order_by('order_date', 'hour')
         ):
-            hourly_map[row['hour']] = row['revenue'] or 0
+            date_str = row['order_date'].strftime('%Y-%m-%d')
+            if date_str not in hourly_by_date:
+                hourly_by_date[date_str] = {h: 0 for h in HOURS}
+            hourly_by_date[date_str][row['hour']] = row['revenue'] or 0
+
         hourly_revenue = [
-            {'hour': f"{h:02d}:00", 'revenue': hourly_map[h]} for h in HOURS
+            {
+                'date': date_str,
+                'hourly': [{'hour': f"{h:02d}:00", 'revenue': hourly_by_date[date_str][h]} for h in HOURS],
+            }
+            for date_str in sorted(hourly_by_date.keys())
         ]
 
-        # 총매출 = 17~23시 시간 윈도우 합산 (일별 매출과 동일한 기준)
-        total_revenue = sum(hourly_map.values())
+        # 총매출 = 17~23시 시간 윈도우 전체 합산
+        total_revenue = sum(
+            v for hmap in hourly_by_date.values() for v in hmap.values()
+        )
 
         # 피크타임 (주문 건수 기준)
         peak_row = (
