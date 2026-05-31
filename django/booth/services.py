@@ -252,20 +252,17 @@ class BoothStatisticsService:
             round(usage_avg['avg'], 1) if usage_avg['avg'] is not None else None
         )
 
-        # 날짜별 매출 (operate_dates 기준으로 초기화)
-        daily_revenue_map = {d: 0 for d in FESTIVAL_DATE_STRS}
-        for row in (
-            Order.objects
-            .filter(id__in=order_ids)
-            .annotate(order_date=TruncDate('created_at', tzinfo=tz))
-            .values('order_date')
-            .annotate(revenue=Sum('order_price'))
-        ):
-            key = row['order_date'].strftime('%Y-%m-%d')
-            if key in daily_revenue_map:
-                daily_revenue_map[key] = row['revenue'] or 0
+        # 날짜별 매출 — 실제 주문 있는 날짜만 동적으로 생성
         daily_revenue = [
-            {'date': k, 'revenue': v} for k, v in daily_revenue_map.items()
+            {'date': row['order_date'].strftime('%Y-%m-%d'), 'revenue': row['revenue'] or 0}
+            for row in (
+                Order.objects
+                .filter(id__in=order_ids)
+                .annotate(order_date=TruncDate('created_at', tzinfo=tz))
+                .values('order_date')
+                .annotate(revenue=Sum('order_price'))
+                .order_by('order_date')
+            )
         ]
 
         # 시간별 매출 (17~23시)
